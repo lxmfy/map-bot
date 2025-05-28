@@ -1,6 +1,6 @@
 import io
 import logging
-import math  # Moved import to top level
+import math
 import re
 from typing import Optional
 
@@ -8,29 +8,33 @@ import requests
 from geopy.exc import GeocoderServiceError, GeocoderTimedOut
 from geopy.geocoders import Nominatim
 
-# Use imports based on the lxmfy examples
 from lxmfy import Attachment, AttachmentType, LXMFBot, command
 from mgrs import MGRS
-from PIL import Image  # Added Pillow import
+from PIL import Image
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Map settings
 MAP_ZOOM_LEVEL = 14
-MAP_GRID_SIZE = 3 # How many tiles wide/high (e.g., 3x3)
-TILE_SIZE = 256 # Standard OSM tile size
-USER_AGENT = 'lxmfy_map_bot/1.0 (requests)' # Define User-Agent once
+MAP_GRID_SIZE = 3
+TILE_SIZE = 256
+USER_AGENT = 'lxmfy_map_bot/1.0 (requests)'
 
-# --- Geocoding and MGRS ---
 geolocator = Nominatim(user_agent="lxmfy_map_bot/1.0")
 m = MGRS()
 
-# --- Map Generation Functions ---
-
 def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
-    """Fetches a single map tile from OSM."""
+    """
+    Fetch a single map tile from OpenStreetMap.
+
+    Args:
+        zoom (int): Zoom level of the tile
+        xtile (int): X coordinate of the tile
+        ytile (int): Y coordinate of the tile
+
+    Returns:
+        bytes | None: Raw image data if successful, None if failed
+    """
     tile_url = f"https://tile.openstreetmap.org/{zoom}/{xtile}/{ytile}.png"
     logger.debug(f"Fetching single map tile: {tile_url}")
     try:
@@ -39,7 +43,6 @@ def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
         response.raise_for_status()
         content_type = response.headers.get('Content-Type', '').lower()
         if 'image' in content_type:
-             # Return raw image bytes
              return response.content
         else:
             logger.warning(f"Tile {zoom}/{xtile}/{ytile} not an image. Content-Type: {content_type}")
@@ -52,10 +55,21 @@ def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
         return None
 
 def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOOM_LEVEL, grid_size: int = MAP_GRID_SIZE) -> bytes | None:
-    """Fetches multiple map tiles around lat/lon and stitches them together."""
+    """
+    Generate a stitched map image from OpenStreetMap tiles.
+
+    Args:
+        lat (float): Latitude of the center point
+        lon (float): Longitude of the center point
+        zoom (int, optional): Zoom level. Defaults to MAP_ZOOM_LEVEL.
+        grid_size (int, optional): Size of the grid (must be odd). Defaults to MAP_GRID_SIZE.
+
+    Returns:
+        bytes | None: PNG image data if successful, None if failed
+    """
     if grid_size < 1 or grid_size % 2 == 0:
         logger.error(f"Invalid grid_size: {grid_size}. Must be a positive odd number.")
-        grid_size = 3 # Fallback to default
+        grid_size = 3
 
     n = 2.0 ** zoom
     center_xtile = int((lon + 180.0) / 360.0 * n)
@@ -64,17 +78,14 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
 
     logger.info(f"Generating {grid_size}x{grid_size} map around tile {zoom}/{center_xtile}/{center_ytile}")
 
-    # Calculate tile range
     radius = (grid_size - 1) // 2
     min_xtile = center_xtile - radius
     min_ytile = center_ytile - radius
 
-    # Create blank canvas
     total_width = grid_size * TILE_SIZE
     total_height = grid_size * TILE_SIZE
-    composite_image = Image.new('RGB', (total_width, total_height), (255, 255, 255)) # White background
+    composite_image = Image.new('RGB', (total_width, total_height), (255, 255, 255))
 
-    # Fetch and paste tiles
     tiles_fetched = 0
     for x_offset in range(grid_size):
         for y_offset in range(grid_size):
@@ -92,9 +103,6 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
                     tiles_fetched += 1
                 except Exception as e:
                     logger.warning(f"Failed to open or paste tile {zoom}/{xtile}/{ytile}: {e}")
-            else:
-                # Optionally draw a placeholder for missing tiles
-                pass
 
     if tiles_fetched == 0:
         logger.error("Failed to fetch any tiles for the composite map.")
@@ -102,7 +110,6 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
 
     logger.info(f"Successfully stitched {tiles_fetched} / {grid_size*grid_size} tiles.")
 
-    # Save composite image to in-memory bytes buffer
     try:
         img_byte_arr = io.BytesIO()
         composite_image.save(img_byte_arr, format='PNG')
@@ -113,7 +120,15 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
         return None
 
 def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
-    """Geocode city name to latitude and longitude."""
+    """
+    Get latitude and longitude coordinates for a city name using geocoding.
+
+    Args:
+        city_name (str): Name of the city to geocode
+
+    Returns:
+        tuple[float, float] | None: (latitude, longitude) if successful, None if failed
+    """
     try:
         location = geolocator.geocode(city_name, timeout=10)
         if location:
@@ -130,9 +145,16 @@ def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
         return None
 
 def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
-    """Convert MGRS coordinate string to latitude and longitude."""
+    """
+    Convert MGRS (Military Grid Reference System) coordinates to latitude and longitude.
+
+    Args:
+        mgrs_coord (str): MGRS coordinate string
+
+    Returns:
+        tuple[float, float] | None: (latitude, longitude) if successful, None if failed
+    """
     try:
-        # Regex to capture GZD, Square ID, and Numerics, ignoring spaces
         mgrs_coord_upper = mgrs_coord.upper().replace(' ', '')
         match = re.match(r'^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$', mgrs_coord_upper)
 
@@ -144,17 +166,14 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
         square_id = match.group(2)
         numerics = match.group(3)
 
-        # Ensure numerics part has an even length for splitting
         if len(numerics) % 2 != 0:
             logger.warning(f"Invalid MGRS numerical part (odd length): '{numerics}' in '{mgrs_coord}'")
             return None
 
-        # Split numerics into Easting and Northing
         split_point = len(numerics) // 2
         easting = numerics[:split_point]
         northing = numerics[split_point:]
 
-        # Format for the MGRS library (GZD<space>SquareID<space>Easting<space>Northing)
         formatted_mgrs = f"{gzd} {square_id} {easting} {northing}"
         logger.info(f"Attempting conversion with formatted MGRS: '{formatted_mgrs}'")
 
@@ -166,7 +185,15 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
         return None
 
 def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
-    """Parse a string potentially containing latitude and longitude."""
+    """
+    Parse a latitude/longitude coordinate string.
+
+    Args:
+        coord_string (str): String containing latitude and longitude (e.g., "45.123, -122.456")
+
+    Returns:
+        tuple[float, float] | None: (latitude, longitude) if valid, None if invalid
+    """
     match = re.match(r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$", coord_string)
     if match:
         try:
@@ -181,44 +208,60 @@ def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
         except ValueError:
             return None
     return None
-
-# --- LXMFy Bot Class ---
-
 class MapBot:
+    """
+    A bot that provides map functionality through LXMF messaging.
+    
+    This bot allows users to request maps for locations specified in various formats:
+    - MGRS (Military Grid Reference System) coordinates
+    - Latitude/Longitude coordinates
+    - City/Town names
+    
+    The bot responds with a stitched map image and an interactive OpenStreetMap link.
+    
+    Attributes:
+        debug_mode (bool): Whether to enable detailed logging
+        bot (LXMFBot): The underlying LXMF bot instance
+    """
+    
     def __init__(self, debug_mode=False):
+        """
+        Initialize the Map Bot.
+
+        Args:
+            debug_mode (bool, optional): Enable detailed logging. Defaults to False.
+        """
         self.debug_mode = debug_mode
         self.bot = LXMFBot(
             name="Map Bot",
-            command_prefix="", # Example prefix, adjust if needed
-            storage_type="json", # Or memory, etc.
-            storage_path="data/map_bot", # Example path
-            announce=600, # Announce interval in seconds
+            command_prefix="",
+            storage_type="json",
+            storage_path="data/map_bot",
+            announce=600,
             announce_immediately=False,
-            first_message_enabled=False # Disable default welcome
+            first_message_enabled=False
         )
-        # Register command using the decorator within the class
         self.bot.command(name="map", description="Get map for MGRS, Lat/Lon, or City. Optional: zoom=N (1-19)")(self.handle_map_command)
 
-    # Reverted to synchronous command handler
     def handle_map_command(self, ctx):
         """
-        Handles the !map command to provide a map image based on user query.
-        Expected query formats:
-        - MGRS: e.g., "31UDQ1234567890" or "31U DQ 12345 67890"
-        - Lat/Lon: e.g., "40.7128, -74.0060" or "40.7128 -74.0060"
-        - City/Town: e.g., "New York City"
-        Optional argument: zoom=N (where N is 1-19)
+        Handle the map command from users.
+        
+        Processes location queries in various formats and returns a map image and link.
+        Supports optional zoom level specification.
+        
+        Args:
+            ctx: The command context containing the message and sender information
         """
-        zoom = MAP_ZOOM_LEVEL # Default zoom
+        zoom = MAP_ZOOM_LEVEL
         location_args = []
         zoom_override = None
 
-        # Parse args for location and optional zoom
         for arg in ctx.args:
             if arg.lower().startswith("zoom="):
                 try:
                     val = int(arg.split('=', 1)[1])
-                    if 1 <= val <= 19: # OSM zoom range
+                    if 1 <= val <= 19:
                         zoom_override = val
                         logger.info(f"User specified zoom: {zoom_override}")
                     else:
@@ -232,61 +275,48 @@ class MapBot:
 
         if zoom_override is not None:
             zoom = zoom_override
-
-        # Get arguments from context
         if not location_args:
             ctx.reply("Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]")
             return
 
         location_query = " ".join(location_args)
-        sender = ctx.sender # Get sender from context
+        sender = ctx.sender
 
         logger.info(f"Received map request for: '{location_query}' (zoom={zoom}) from {sender}")
         query = location_query.strip()
         lat, lon = None, None
-        map_source_type = "location" # Default description
+        map_source_type = "location"
 
-        # 1. Try parsing as MGRS
-        # Simple check: starts like MGRS grid zone designator (GZD) + 100km square ID
         if re.match(r"^[0-9]{1,2}[C-HJ-NP-X]\s?[A-HJ-NP-Z]{2}", query.upper().split()[0]):
              coords = get_coords_from_mgrs(query.upper())
              if coords:
                  lat, lon = coords
                  map_source_type = f"MGRS coordinate {query}"
 
-        # 2. Try parsing as Lat/Lon (if not already found)
         if lat is None and lon is None:
             coords = parse_lat_lon(query)
             if coords:
                 lat, lon = coords
                 map_source_type = f"Lat/Lon coordinate {query}"
 
-        # 3. Try geocoding as City/Town (if not already found)
         if lat is None and lon is None and map_source_type == "location":
-            # Avoid trying to geocode if it looked like MGRS or Lat/Lon but failed parsing
             coords = get_coords_from_city(query)
             if coords:
                 lat, lon = coords
                 map_source_type = f"city/town '{query}'"
 
-        # --- Generate and Send Map ---
         if lat is not None and lon is not None:
-            # Use the new stitching function
             image_data = get_openstreetmap_stitched_image(lat, lon, zoom)
-
-            # Generate interactive map link (using center lat/lon)
             osm_link = f"https://www.openstreetmap.org/#map={zoom}/{lat:.5f}/{lon:.5f}"
 
             if image_data:
                 try:
                     attachment = Attachment(
                         type=AttachmentType.IMAGE,
-                        # Updated filename slightly
                         name=f"map_{lat:.4f}_{lon:.4f}_z{zoom}.png",
                         data=image_data,
                         format="png"
                     )
-                    # Use send_with_attachment based on meme_bot example
                     message = (
                         f"Map for {map_source_type} (Zoom: {zoom}, {MAP_GRID_SIZE}x{MAP_GRID_SIZE} area):\n"
                         f"Interactive map (center): {osm_link}\n\n"
@@ -296,7 +326,7 @@ class MapBot:
                         destination=sender,
                         message=message,
                         attachment=attachment,
-                        title="Map Location" # Optional title
+                        title="Map Location"
                     )
                     logger.info(f"Sent map image and link for '{query}' to {sender}")
 
@@ -309,13 +339,15 @@ class MapBot:
             ctx.reply(f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]")
 
     def run(self):
-        """Starts the bot."""
+        """
+        Start the Map Bot.
+        
+        Initializes the bot and begins listening for commands.
+        """
         logger.info("Starting Map Bot...")
         self.bot.run()
 
-# --- Main Execution Block ---
-
-if __name__ == "__main__":
+def main():
     import argparse
     parser = argparse.ArgumentParser(description='Run the LXMFy Map Bot.')
     parser.add_argument(
@@ -325,17 +357,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Instantiate and run the bot
     map_bot = MapBot(debug_mode=args.debug)
     map_bot.run()
 
     print("<< Remember to install dependencies: pip install requests geopy python-mgrs >>")
-    # Example Usage (for testing functions directly without full bot)
-    # print(get_coords_from_mgrs("31UDQ 12345 67890"))
-    # print(parse_lat_lon("40.7128, -74.0060"))
-    # print(get_coords_from_city("Paris, France"))
-    # img_data = get_openstreetmap_image(48.8566, 2.3522) # Paris
-    # if img_data:
-    #     with open("test_map.png", "wb") as f:
-    #         f.write(img_data)
-    #     print("Saved test_map.png")
+
+if __name__ == "__main__":
+    main()
