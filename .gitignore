@@ -1,3 +1,4 @@
 data/
 config/
 .ruff_cache/
+__pycache__/
