@@ -20,14 +20,33 @@ MAP_GRID_SIZE = 3
 TILE_SIZE = 256
 USER_AGENT = 'lxmfy_map_bot/1.0 (requests)'
 
+# Tile providers configuration
+TILE_PROVIDERS = {
+    'osm': {
+        'url': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'attribution': '© OpenStreetMap contributors'
+    },
+    'openfree': {
+        'url': 'https://tile.openfreemap.org/hike/{z}/{x}/{y}.png',
+        'attribution': '© OpenFreeMap'
+    }
+}
+
 geolocator = Nominatim(user_agent="lxmfy_map_bot/1.0")
 m = MGRS()
 
-def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
+def _build_tile_url(provider: str, zoom: int, xtile: int, ytile: int, layer: Optional[str] = None) -> str:
+    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS['osm'])
+    url_template = provider_info['url']
+    return url_template.format(z=zoom, x=xtile, y=ytile)
+
+def _fetch_single_tile(provider: str, layer: Optional[str], zoom: int, xtile: int, ytile: int) -> bytes | None:
     """
     Fetch a single map tile from OpenStreetMap.
 
     Args:
+        provider (str): Tile provider
+        layer (Optional[str]): Layer for the tile
         zoom (int): Zoom level of the tile
         xtile (int): X coordinate of the tile
         ytile (int): Y coordinate of the tile
@@ -35,7 +54,7 @@ def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
     Returns:
         bytes | None: Raw image data if successful, None if failed
     """
-    tile_url = f"https://tile.openstreetmap.org/{zoom}/{xtile}/{ytile}.png"
+    tile_url = _build_tile_url(provider, zoom, xtile, ytile, layer)
     logger.debug(f"Fetching single map tile: {tile_url}")
     try:
         headers = {'User-Agent': USER_AGENT}
@@ -54,7 +73,7 @@ def _fetch_single_tile(zoom: int, xtile: int, ytile: int) -> bytes | None:
         logger.error(f"Unexpected error fetching tile {zoom}/{xtile}/{ytile}: {e}")
         return None
 
-def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOOM_LEVEL, grid_size: int = MAP_GRID_SIZE) -> bytes | None:
+def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOOM_LEVEL, grid_size: int = MAP_GRID_SIZE, provider: str = 'osm', layer: Optional[str] = None) -> bytes | None:
     """
     Generate a stitched map image from OpenStreetMap tiles.
 
@@ -63,6 +82,8 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
         lon (float): Longitude of the center point
         zoom (int, optional): Zoom level. Defaults to MAP_ZOOM_LEVEL.
         grid_size (int, optional): Size of the grid (must be odd). Defaults to MAP_GRID_SIZE.
+        provider (str, optional): Tile provider. Defaults to 'osm'.
+        layer (Optional[str], optional): Layer for the tile. Defaults to None.
 
     Returns:
         bytes | None: PNG image data if successful, None if failed
@@ -92,7 +113,7 @@ def get_openstreetmap_stitched_image(lat: float, lon: float, zoom: int = MAP_ZOO
             xtile = min_xtile + x_offset
             ytile = min_ytile + y_offset
 
-            tile_data = _fetch_single_tile(zoom, xtile, ytile)
+            tile_data = _fetch_single_tile(provider, layer, zoom, xtile, ytile)
 
             if tile_data:
                 try:
@@ -208,6 +229,7 @@ def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
         except ValueError:
             return None
     return None
+
 class MapBot:
     """
     A bot that provides map functionality through LXMF messaging.
@@ -245,6 +267,7 @@ class MapBot:
         # Help command to show usage instructions
         self.bot.command(name="help", description="Show usage instructions")(self.handle_help_command)
         self.bot.command(name="/help", description="Show usage instructions")(self.handle_help_command)
+        self.bot.command(name="reverse", description="Reverse geocode Lat/Lon to address")(self.handle_reverse_command)
 
     def handle_map_command(self, ctx):
         """
@@ -257,8 +280,11 @@ class MapBot:
             ctx: The command context containing the message and sender information
         """
         zoom = MAP_ZOOM_LEVEL
+        provider = 'osm'
+        layer = None
         location_args = []
         zoom_override = None
+        provider_override = None
 
         for arg in ctx.args:
             if arg.lower().startswith("zoom="):
@@ -273,13 +299,24 @@ class MapBot:
                 except (ValueError, IndexError):
                     ctx.reply(f"Invalid format for zoom argument: '{arg}'. Use 'zoom=N'.")
                     return
+            elif arg.lower().startswith("provider="):
+                val = arg.split('=',1)[1].lower()
+                if val in TILE_PROVIDERS:
+                    provider_override = val
+                else:
+                    ctx.reply(f"Invalid provider specified: {val}. Available: {', '.join(TILE_PROVIDERS.keys())}")
+                    return
+            elif arg.lower().startswith("layer="):
+                layer = arg.split('=',1)[1].lower()
             else:
                 location_args.append(arg)
 
         if zoom_override is not None:
             zoom = zoom_override
+        if provider_override:
+            provider = provider_override
         if not location_args:
-            ctx.reply("Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]")
+            ctx.reply("Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]")
             return
 
         location_query = " ".join(location_args)
@@ -309,7 +346,7 @@ class MapBot:
                 map_source_type = f"city/town '{query}'"
 
         if lat is not None and lon is not None:
-            image_data = get_openstreetmap_stitched_image(lat, lon, zoom)
+            image_data = get_openstreetmap_stitched_image(lat, lon, zoom, MAP_GRID_SIZE, provider, layer)
             osm_link = f"https://www.openstreetmap.org/#map={zoom}/{lat:.5f}/{lon:.5f}"
 
             if image_data:
@@ -339,19 +376,21 @@ class MapBot:
             else:
                 ctx.reply(f"Sorry, I couldn't retrieve the map image for {map_source_type} (zoom {zoom}).")
         else:
-            ctx.reply(f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]")
+            ctx.reply(f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]")
 
     def handle_help_command(self, ctx):
         """
         Provide usage instructions for the map command.
         """
         help_msg = (
-            "Usage: map <location> [zoom=N]\n\n"
+            "Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]\n\n"
             "Get a stitched OpenStreetMap image based on:\n"
             "- MGRS coordinates (e.g., 38SMB12345678)\n"
             "- Latitude/Longitude (e.g., 40.7128,-74.0060)\n"
             "- City/Town name (e.g., New York City)\n\n"
             "Optional zoom levels: zoom=1 through zoom=19\n"
+            "Optional tile providers: provider=osm,stamen,openfree\n"
+            "Optional layers (for stamen): layer=terrain,toner,watercolor\n"
             "Examples:\n"
             "map 38SMB12345678\n"
             "map 40.7128,-74.0060 zoom=12\n"
@@ -359,6 +398,30 @@ class MapBot:
             "Type 'help' or '/help' to see this message again."
         )
         ctx.reply(help_msg)
+
+    def handle_reverse_command(self, ctx):
+        """
+        Reverse geocode a latitude/longitude to a human-readable address.
+        """
+        if not ctx.args:
+            ctx.reply("Usage: reverse <lat,lon>")
+            return
+        query = " ".join(ctx.args)
+        coords = parse_lat_lon(query)
+        if not coords:
+            ctx.reply("Invalid Lat/Lon format. Use e.g. 40.7128,-74.0060")
+            return
+        lat, lon = coords
+        try:
+            location = geolocator.reverse(f"{lat}, {lon}", exactly_one=True, timeout=10)
+            if location and location.address:
+                ctx.reply(f"Reverse geocode for ({lat}, {lon}): {location.address}")
+            else:
+                ctx.reply(f"No address found for ({lat}, {lon})")
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            ctx.reply(f"Geocoding error: {e}")
+        except Exception as e:
+            ctx.reply(f"Unexpected error: {e}")
 
     def run(self):
         """
