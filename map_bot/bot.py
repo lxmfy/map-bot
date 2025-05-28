@@ -242,6 +242,9 @@ class MapBot:
             first_message_enabled=False
         )
         self.bot.command(name="map", description="Get map for MGRS, Lat/Lon, or City. Optional: zoom=N (1-19)")(self.handle_map_command)
+        # Help command to show usage instructions
+        self.bot.command(name="help", description="Show usage instructions")(self.handle_help_command)
+        self.bot.command(name="/help", description="Show usage instructions")(self.handle_help_command)
 
     def handle_map_command(self, ctx):
         """
@@ -337,6 +340,25 @@ class MapBot:
                 ctx.reply(f"Sorry, I couldn't retrieve the map image for {map_source_type} (zoom {zoom}).")
         else:
             ctx.reply(f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]")
+
+    def handle_help_command(self, ctx):
+        """
+        Provide usage instructions for the map command.
+        """
+        help_msg = (
+            "Usage: map <location> [zoom=N]\n\n"
+            "Get a stitched OpenStreetMap image based on:\n"
+            "- MGRS coordinates (e.g., 38SMB12345678)\n"
+            "- Latitude/Longitude (e.g., 40.7128,-74.0060)\n"
+            "- City/Town name (e.g., New York City)\n\n"
+            "Optional zoom levels: zoom=1 through zoom=19\n"
+            "Examples:\n"
+            "map 38SMB12345678\n"
+            "map 40.7128,-74.0060 zoom=12\n"
+            "map \"New York City\"\n\n"
+            "Type 'help' or '/help' to see this message again."
+        )
+        ctx.reply(help_msg)
 
     def run(self):
         """
