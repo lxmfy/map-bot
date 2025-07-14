@@ -5,13 +5,13 @@ A simple LXMFy bot that generates and sends stitched OpenStreetMap images based 
 ## Installation
 
 ```bash
-pip install requests geopy python-mgrs pillow lxmfy
+pipx install git+https://github.com/lxmfy/map-bot
 ```
 
 ## Usage
 
 ```bash
-python map_bot/bot.py
+map-bot
 ```
 
 Once running, send the `map` command to the bot:
