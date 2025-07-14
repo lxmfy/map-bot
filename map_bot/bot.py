@@ -115,7 +115,7 @@ def get_openstreetmap_stitched_image(
     n = 2.0**zoom
     center_xtile = int((lon + 180.0) / 360.0 * n)
     lat_rad = math.radians(lat)
-    center_ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / 2.0 * n) / math.pi)
+    center_ytile = int(n * (1 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2)
 
     logger.info(
         "Generating %dx%d map around tile %d/%d/%d",
