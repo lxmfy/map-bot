@@ -59,7 +59,7 @@ def _fetch_single_tile(
         bytes | None: Raw image data if successful, None if failed
     """
     tile_url = _build_tile_url(provider, zoom, xtile, ytile, layer)
-    logger.debug(f"Fetching single map tile: {tile_url}")
+    logger.debug("Fetching single map tile: %s", tile_url)
     try:
         headers = {"User-Agent": USER_AGENT}
         response = requests.get(tile_url, headers=headers, timeout=10)
@@ -69,14 +69,20 @@ def _fetch_single_tile(
             return response.content
         else:
             logger.warning(
-                f"Tile {zoom}/{xtile}/{ytile} not an image. Content-Type: {content_type}"
+                "Tile %d/%d/%d not an image. Content-Type: %s",
+                zoom,
+                xtile,
+                ytile,
+                content_type,
             )
             return None
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Error fetching tile {zoom}/{xtile}/{ytile}: {e}")
+        logger.warning("Error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e)
         return None
     except Exception as e:
-        logger.error(f"Unexpected error fetching tile {zoom}/{xtile}/{ytile}: {e}")
+        logger.error(
+            "Unexpected error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e
+        )
         return None
 
 
@@ -103,16 +109,21 @@ def get_openstreetmap_stitched_image(
         bytes | None: PNG image data if successful, None if failed
     """
     if grid_size < 1 or grid_size % 2 == 0:
-        logger.error(f"Invalid grid_size: {grid_size}. Must be a positive odd number.")
+        logger.error("Invalid grid_size: %d. Must be a positive odd number.", grid_size)
         grid_size = 3
 
     n = 2.0**zoom
     center_xtile = int((lon + 180.0) / 360.0 * n)
     lat_rad = math.radians(lat)
-    center_ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    center_ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / 2.0 * n) / math.pi)
 
     logger.info(
-        f"Generating {grid_size}x{grid_size} map around tile {zoom}/{center_xtile}/{center_ytile}"
+        "Generating %dx%d map around tile %d/%d/%d",
+        grid_size,
+        grid_size,
+        zoom,
+        center_xtile,
+        center_ytile,
     )
 
     radius = (grid_size - 1) // 2
@@ -140,7 +151,11 @@ def get_openstreetmap_stitched_image(
                     tiles_fetched += 1
                 except Exception as e:
                     logger.warning(
-                        f"Failed to open or paste tile {zoom}/{xtile}/{ytile}: {e}"
+                        "Failed to open or paste tile %d/%d/%d: %s",
+                        zoom,
+                        xtile,
+                        ytile,
+                        e,
                     )
 
     if tiles_fetched == 0:
@@ -148,7 +163,7 @@ def get_openstreetmap_stitched_image(
         return None
 
     logger.info(
-        f"Successfully stitched {tiles_fetched} / {grid_size * grid_size} tiles."
+        "Successfully stitched %d / %d tiles.", tiles_fetched, grid_size * grid_size
     )
 
     try:
@@ -157,7 +172,7 @@ def get_openstreetmap_stitched_image(
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     except Exception as e:
-        logger.error(f"Failed to save composite image to buffer: {e}")
+        logger.error("Failed to save composite image to buffer: %s", e)
         return None
 
 
@@ -175,17 +190,20 @@ def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
         location = geolocator.geocode(city_name, timeout=10)
         if location:
             logger.info(
-                f"Geocoded '{city_name}' to ({location.latitude}, {location.longitude})"
+                "Geocoded '%s' to (%s, %s)",
+                city_name,
+                location.latitude,
+                location.longitude,
             )
             return location.latitude, location.longitude
         else:
-            logger.warning(f"Could not geocode city: {city_name}")
+            logger.warning("Could not geocode city: %s", city_name)
             return None
     except (GeocoderTimedOut, GeocoderServiceError) as e:
-        logger.error(f"Geocoding error for '{city_name}': {e}")
+        logger.error("Geocoding error for '%s': %s", city_name, e)
         return None
     except Exception as e:
-        logger.error(f"Unexpected geocoding error: {e}")
+        logger.error("Unexpected geocoding error: %s", e)
         return None
 
 
@@ -206,7 +224,7 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
         )
 
         if not match:
-            logger.warning(f"Could not parse MGRS structure: '{mgrs_coord}'")
+            logger.warning("Could not parse MGRS structure: '%s'", mgrs_coord)
             return None
 
         gzd = match.group(1)
@@ -215,7 +233,9 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
 
         if len(numerics) % 2 != 0:
             logger.warning(
-                f"Invalid MGRS numerical part (odd length): '{numerics}' in '{mgrs_coord}'"
+                "Invalid MGRS numerical part (odd length): '%s' in '%s'",
+                numerics,
+                mgrs_coord,
             )
             return None
 
@@ -224,16 +244,23 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
         northing = numerics[split_point:]
 
         formatted_mgrs = f"{gzd} {square_id} {easting} {northing}"
-        logger.info(f"Attempting conversion with formatted MGRS: '{formatted_mgrs}'")
+        logger.info("Attempting conversion with formatted MGRS: '%s'", formatted_mgrs)
 
         lat, lon = m.toLatLon(formatted_mgrs.encode("utf-8"))
         logger.info(
-            f"Converted MGRS '{mgrs_coord}' (formatted as '{formatted_mgrs}') to ({lat}, {lon})"
+            "Converted MGRS '%s' (formatted as '%s') to (%s, %s)",
+            mgrs_coord,
+            formatted_mgrs,
+            lat,
+            lon,
         )
         return lat, lon
     except Exception as e:
         logger.warning(
-            f"Could not convert MGRS coordinate '{mgrs_coord}' (tried format '{formatted_mgrs}'): {e}"
+            "Could not convert MGRS coordinate '%s' (tried format '%s'): %s",
+            mgrs_coord,
+            formatted_mgrs,
+            e,
         )
         return None
 
@@ -256,10 +283,10 @@ def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
             lat = float(match.group(1))
             lon = float(match.group(2))
             if -90 <= lat <= 90 and -180 <= lon <= 180:
-                logger.info(f"Parsed Lat/Lon: ({lat}, {lon})")
+                logger.info("Parsed Lat/Lon: (%s, %s)", lat, lon)
                 return lat, lon
             else:
-                logger.warning(f"Invalid Lat/Lon range: ({lat}, {lon})")
+                logger.warning("Invalid Lat/Lon range: (%s, %s)", lat, lon)
                 return None
         except ValueError:
             return None
@@ -337,7 +364,7 @@ class MapBot:
                     val = int(arg.split("=", 1)[1])
                     if 1 <= val <= 19:
                         zoom_override = val
-                        logger.info(f"User specified zoom: {zoom_override}")
+                        logger.info("User specified zoom: %s", zoom_override)
                     else:
                         ctx.reply(
                             f"Invalid zoom level specified: {val}. Must be between 1 and 19."
@@ -376,7 +403,10 @@ class MapBot:
         sender = ctx.sender
 
         logger.info(
-            f"Received map request for: '{location_query}' (zoom={zoom}) from {sender}"
+            "Received map request for: '%s' (zoom=%s) from %s",
+            location_query,
+            zoom,
+            sender,
         )
         query = location_query.strip()
         lat, lon = None, None
@@ -427,10 +457,10 @@ class MapBot:
                         attachment=attachment,
                         title="Map Location",
                     )
-                    logger.info(f"Sent map image and link for '{query}' to {sender}")
+                    logger.info("Sent map image and link for '%s' to %s", query, sender)
 
                 except Exception as e:
-                    logger.error(f"Failed to create or send map attachment: {e}")
+                    logger.error("Failed to create or send map attachment: %s", e)
                     ctx.reply(
                         f"Sorry, I encountered an error trying to send the map image: {e}"
                     )
@@ -443,7 +473,8 @@ class MapBot:
                 f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]"
             )
 
-    def handle_help_command(self, ctx):
+    @staticmethod
+    def handle_help_command(ctx):
         """
         Provide usage instructions for the map command.
         """
@@ -464,7 +495,8 @@ class MapBot:
         )
         ctx.reply(help_msg)
 
-    def handle_reverse_command(self, ctx):
+    @staticmethod
+    def handle_reverse_command(ctx):
         """
         Reverse geocode a latitude/longitude to a human-readable address.
         """
