@@ -9,7 +9,8 @@ from pathlib import Path
 import requests
 from geopy.exc import GeocoderServiceError, GeocoderTimedOut
 from geopy.geocoders import Nominatim
-from lxmfy import Attachment, AttachmentType, LXMFBot
+import LXMF
+from lxmfy import Attachment, AttachmentType, LXMFBot, IconAppearance, pack_icon_appearance_field
 from mgrs import MGRS
 from PIL import Image
 from pmtiles import reader
@@ -34,6 +35,15 @@ m = MGRS()
 
 PMTILES_DIR = Path("data/pmtiles")
 PMTILES_URL_BASE = "https://build.protomaps.com"
+
+# Bot icon appearance configuration
+BOT_ICON = IconAppearance(
+    icon_name="map",  # Material Symbols map icon
+    fg_color=b'\xFF\xFF\xFF',  # White foreground
+    bg_color=b'\x1E\x88\xE5'   # Blue background (OpenStreetMap blue)
+)
+
+BOT_ICON_FIELD = pack_icon_appearance_field(BOT_ICON)
 
 
 def download_latest_pmtiles() -> str | None:
@@ -521,6 +531,7 @@ class MapBot:
             announce=600,
             announce_immediately=False,
             first_message_enabled=False,
+            signature_verification_enabled=True,
         )
         self.bot.command(
             name="map",
@@ -536,6 +547,27 @@ class MapBot:
         self.bot.command(
             name="reverse", description="Reverse geocode Lat/Lon to address"
         )(self.handle_reverse_command)
+
+    def send_message_with_icon(self, destination, message, title=None, **kwargs):
+        """
+        Send a message with the bot's icon appearance.
+
+        Args:
+            destination: Message destination
+            message: Message content
+            title: Optional message title
+            **kwargs: Additional arguments passed to bot.send()
+        """
+        lxmf_fields = kwargs.pop('lxmf_fields', {})
+        lxmf_fields.update(BOT_ICON_FIELD)
+
+        return self.bot.send(
+            destination=destination,
+            message=message,
+            title=title,
+            lxmf_fields=lxmf_fields,
+            **kwargs
+        )
 
     def handle_map_command(self, ctx):
         """
@@ -650,6 +682,7 @@ class MapBot:
                         message=message,
                         attachment=attachment,
                         title="Map Location",
+                        lxmf_fields=BOT_ICON_FIELD,
                     )
                     logger.info("Sent map image and link for '%s' to %s", query, sender)
 
