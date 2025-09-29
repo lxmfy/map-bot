@@ -214,10 +214,11 @@ def update_pmtiles() -> str | None:
 def _build_tile_url(
     provider: str, zoom: int, xtile: int, ytile: int, layer: str | None = None,
 ) -> str:
-    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
+    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS.get("osm", {"type": "osm"}))
     if provider_info.get("type") == "pmtiles":
         return f"pmtiles://{zoom}/{xtile}/{ytile}"
-    return f"pmtiles://{zoom}/{xtile}/{ytile}"
+    # OSM tile URL
+    return f"https://tile.openstreetmap.org/{zoom}/{xtile}/{ytile}.png"
 
 
 def _fetch_single_tile(
@@ -238,36 +239,77 @@ def _fetch_single_tile(
     """
     provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
 
-    if provider_info.get("type") == "pmtiles":
-        if not layer:
-            layer = get_pmtiles_path()
-            if not layer:
-                logger.error("No PMTiles file available and download failed")
-                return None
+    # Try PMTiles first if available
+    tile_data = None
+    pmtiles_tried = False
+    if provider_info.get("type") == "pmtiles" or provider == "pmtiles":
+        pmtiles_path = get_pmtiles_path()
+        if pmtiles_path:
+            try:
+                with open(pmtiles_path, "rb") as f:
+                    def get_bytes(offset, length):
+                        f.seek(offset)
+                        return f.read(length)
 
-        try:
-            with open(layer, "rb") as f:
-                def get_bytes(offset, length):
-                    f.seek(offset)
-                    return f.read(length)
+                    pmtiles_reader = reader.Reader(get_bytes)
+                    tile_data = pmtiles_reader.get(zoom, xtile, ytile)
 
-                pmtiles_reader = reader.Reader(get_bytes)
-                tile_data = pmtiles_reader.get(zoom, xtile, ytile)
+                    if tile_data:
+                        logger.debug("Fetched PMTiles tile: %d/%d/%d from %s, size: %d bytes", zoom, xtile, ytile, pmtiles_path, len(tile_data))
+                        logger.debug("Tile data starts with: %s", tile_data[:20].hex() if len(tile_data) >= 20 else tile_data.hex())
 
-                if tile_data:
-                    logger.debug("Fetched PMTiles tile: %d/%d/%d from %s", zoom, xtile, ytile, layer)
-                    return tile_data
-                logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, layer)
-                return None
+                        # Decompress tile data if compressed
+                        header = pmtiles_reader.header
+                        if hasattr(header, "tile_compression"):
+                            compression = header.tile_compression
+                            if compression == reader.Compression.GZIP:
+                                import gzip
+                                try:
+                                    tile_data = gzip.decompress(tile_data)
+                                    logger.debug("Decompressed gzip tile: %d/%d/%d, new size: %d bytes", zoom, xtile, ytile, len(tile_data))
+                                    logger.debug("Decompressed data starts with: %s", tile_data[:20].hex() if len(tile_data) >= 20 else tile_data.hex())
+                                except Exception as e:
+                                    logger.warning("Failed to decompress gzip tile %d/%d/%d: %s", zoom, xtile, ytile, e)
+                            elif compression == reader.Compression.BROTLI:
+                                try:
+                                    import brotli
+                                    tile_data = brotli.decompress(tile_data)
+                                    logger.debug("Decompressed brotli tile: %d/%d/%d", zoom, xtile, ytile)
+                                except (ImportError, Exception) as e:
+                                    logger.warning("Failed to decompress brotli tile %d/%d/%d: %s", zoom, xtile, ytile, e)
+                            elif compression == reader.Compression.ZSTD:
+                                try:
+                                    import zstandard
+                                    dctx = zstandard.ZstdDecompressor()
+                                    tile_data = dctx.decompress(tile_data)
+                                    logger.debug("Decompressed zstd tile: %d/%d/%d", zoom, xtile, ytile)
+                                except (ImportError, Exception) as e:
+                                    logger.warning("Failed to decompress zstd tile %d/%d/%d: %s", zoom, xtile, ytile, e)
+                            # Compression.NONE or UNKNOWN: use as-is
 
-        except FileNotFoundError:
-            logger.warning("PMTiles file not found: %s", layer)
-            return None
-        except Exception as e:
-            logger.error("Error reading PMTiles tile %d/%d/%d from %s: %s", zoom, xtile, ytile, layer, e)
-            return None
-    else:
-        tile_url = _build_tile_url(provider, zoom, xtile, ytile, layer)
+                        # Check if the tile data is a valid image
+                        try:
+                            from PIL import Image
+                            Image.open(io.BytesIO(tile_data)).verify()
+                            logger.debug("Valid image tile: %d/%d/%d", zoom, xtile, ytile)
+                            return tile_data
+                        except Exception as e:
+                            logger.warning("Invalid image data for tile %d/%d/%d: %s", zoom, xtile, ytile, e)
+                            tile_data = None  # Reset to try OSM
+
+                    else:
+                        logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, pmtiles_path)
+
+            except FileNotFoundError:
+                logger.warning("PMTiles file not found: %s", pmtiles_path)
+            except Exception as e:
+                logger.error("Error reading PMTiles tile %d/%d/%d from %s: %s", zoom, xtile, ytile, pmtiles_path, e)
+
+        pmtiles_tried = True
+
+    # Fall back to OSM if PMTiles failed or not available
+    if not tile_data:
+        tile_url = _build_tile_url("osm", zoom, xtile, ytile, layer)
         logger.debug("Fetching single map tile: %s", tile_url)
         try:
             headers = {"User-Agent": USER_AGENT}
