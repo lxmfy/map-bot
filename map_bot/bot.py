@@ -239,75 +239,10 @@ def _fetch_single_tile(
     """
     provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
 
-    # Try PMTiles first if available
+    # Skip PMTiles entirely for now - use OSM tiles only
     tile_data = None
-    pmtiles_tried = False
-    if provider_info.get("type") == "pmtiles" or provider == "pmtiles":
-        pmtiles_path = get_pmtiles_path()
-        if pmtiles_path:
-            try:
-                with open(pmtiles_path, "rb") as f:
-                    def get_bytes(offset, length):
-                        f.seek(offset)
-                        return f.read(length)
 
-                    pmtiles_reader = reader.Reader(get_bytes)
-                    tile_data = pmtiles_reader.get(zoom, xtile, ytile)
-
-                    if tile_data:
-                        logger.debug("Fetched PMTiles tile: %d/%d/%d from %s, size: %d bytes", zoom, xtile, ytile, pmtiles_path, len(tile_data))
-                        logger.debug("Tile data starts with: %s", tile_data[:20].hex() if len(tile_data) >= 20 else tile_data.hex())
-
-                        # Decompress tile data if compressed
-                        header = pmtiles_reader.header
-                        if hasattr(header, "tile_compression"):
-                            compression = header.tile_compression
-                            if compression == reader.Compression.GZIP:
-                                import gzip
-                                try:
-                                    tile_data = gzip.decompress(tile_data)
-                                    logger.debug("Decompressed gzip tile: %d/%d/%d, new size: %d bytes", zoom, xtile, ytile, len(tile_data))
-                                    logger.debug("Decompressed data starts with: %s", tile_data[:20].hex() if len(tile_data) >= 20 else tile_data.hex())
-                                except Exception as e:
-                                    logger.warning("Failed to decompress gzip tile %d/%d/%d: %s", zoom, xtile, ytile, e)
-                            elif compression == reader.Compression.BROTLI:
-                                try:
-                                    import brotli
-                                    tile_data = brotli.decompress(tile_data)
-                                    logger.debug("Decompressed brotli tile: %d/%d/%d", zoom, xtile, ytile)
-                                except (ImportError, Exception) as e:
-                                    logger.warning("Failed to decompress brotli tile %d/%d/%d: %s", zoom, xtile, ytile, e)
-                            elif compression == reader.Compression.ZSTD:
-                                try:
-                                    import zstandard
-                                    dctx = zstandard.ZstdDecompressor()
-                                    tile_data = dctx.decompress(tile_data)
-                                    logger.debug("Decompressed zstd tile: %d/%d/%d", zoom, xtile, ytile)
-                                except (ImportError, Exception) as e:
-                                    logger.warning("Failed to decompress zstd tile %d/%d/%d: %s", zoom, xtile, ytile, e)
-                            # Compression.NONE or UNKNOWN: use as-is
-
-                        # Check if the tile data is a valid image
-                        try:
-                            from PIL import Image
-                            Image.open(io.BytesIO(tile_data)).verify()
-                            logger.debug("Valid image tile: %d/%d/%d", zoom, xtile, ytile)
-                            return tile_data
-                        except Exception as e:
-                            logger.warning("Invalid image data for tile %d/%d/%d: %s", zoom, xtile, ytile, e)
-                            tile_data = None  # Reset to try OSM
-
-                    else:
-                        logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, pmtiles_path)
-
-            except FileNotFoundError:
-                logger.warning("PMTiles file not found: %s", pmtiles_path)
-            except Exception as e:
-                logger.error("Error reading PMTiles tile %d/%d/%d from %s: %s", zoom, xtile, ytile, pmtiles_path, e)
-
-        pmtiles_tried = True
-
-    # Fall back to OSM if PMTiles failed or not available
+    # Fall back to OSM tiles
     if not tile_data:
         tile_url = _build_tile_url("osm", zoom, xtile, ytile, layer)
         logger.debug("Fetching single map tile: %s", tile_url)
@@ -691,16 +626,6 @@ class MapBot:
                 map_source_type = f"city/town '{query}'"
 
         if lat is not None and lon is not None:
-            pmtiles_path = get_pmtiles_path()
-            if not pmtiles_path:
-                ctx.reply(
-                    "No PMTiles data available. Please download PMTiles first using:\n"
-                    "--download-latest (for latest)\n"
-                    "--update (to update existing)\n"
-                    "--download YYYYMMDD (for specific date)",
-                )
-                return
-
             image_data = get_stitched_map_image(
                 lat, lon, zoom, MAP_GRID_SIZE, provider, layer,
             )
@@ -745,19 +670,15 @@ class MapBot:
     def handle_help_command(ctx):
         help_msg = (
             "Usage: map <location> [zoom=N]\n\n"
-            "Get an offline stitched map image using PMTiles data:\n"
+            "Get a stitched map image using OpenStreetMap tiles:\n"
             "- MGRS coordinates (e.g., 38SMB12345678)\n"
             "- Latitude/Longitude (e.g., 40.7128,-74.0060)\n"
             "- City/Town name (e.g., New York City)\n\n"
-            "Optional zoom levels: zoom=1 through zoom=19\n"
-            "PMTiles data must be downloaded first using command-line flags.\n\n"
+            "Optional zoom levels: zoom=1 through zoom=19\n\n"
             "Commands:\n"
             "map <location> [zoom=N] - Get map for location\n"
             "reverse <lat,lon> - Reverse geocode coordinates to address\n\n"
-            "Download PMTiles data first:\n"
-            "--download-latest  - Download latest available\n"
-            "--update           - Update if newer available\n"
-            "--download YYYYMMDD - Download specific date\n\n"
+            "Uses OpenStreetMap tiles (no local data required)\n\n"
             "Examples:\n"
             "map 38SMB12345678\n"
             "map 40.7128,-74.0060 zoom=12\n"
@@ -810,53 +731,7 @@ def main():
         help="Enable detailed logging (currently mainly for startup/errors).",
     )
 
-    pmtiles_group = parser.add_mutually_exclusive_group()
-    pmtiles_group.add_argument(
-        "--download-latest",
-        action="store_true",
-        help="Download the latest available PMTiles file from Protomaps.",
-    )
-    pmtiles_group.add_argument(
-        "--update",
-        action="store_true",
-        help="Update to the latest PMTiles if newer than current local file.",
-    )
-    pmtiles_group.add_argument(
-        "--download",
-        metavar="DATE",
-        help="Download PMTiles file for specific date (YYYYMMDD format).",
-    )
-
     args = parser.parse_args()
-    if args.download_latest:
-        print("Downloading latest PMTiles...")
-        path = download_pmtiles_by_date()
-        if path:
-            file_size = os.path.getsize(path) / (1024 * 1024)
-            print(f"Successfully downloaded: {os.path.basename(path)} ({file_size:.1f} MB)")
-        else:
-            print("Failed to download PMTiles.")
-        return
-
-    if args.update:
-        print("Updating PMTiles...")
-        path = update_pmtiles()
-        if path:
-            file_size = os.path.getsize(path) / (1024 * 1024)
-            print(f"PMTiles ready: {os.path.basename(path)} ({file_size:.1f} MB)")
-        else:
-            print("Failed to update PMTiles.")
-        return
-
-    if args.download:
-        print(f"Downloading PMTiles for date {args.download}...")
-        path = download_pmtiles_by_date(args.download)
-        if path:
-            file_size = os.path.getsize(path) / (1024 * 1024)
-            print(f"Successfully downloaded: {os.path.basename(path)} ({file_size:.1f} MB)")
-        else:
-            print("Failed to download PMTiles for specified date.")
-        return
     map_bot = MapBot(debug_mode=args.debug)
     map_bot.run()
 
