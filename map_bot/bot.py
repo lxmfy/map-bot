@@ -9,8 +9,13 @@ from pathlib import Path
 import requests
 from geopy.exc import GeocoderServiceError, GeocoderTimedOut
 from geopy.geocoders import Nominatim
-import LXMF
-from lxmfy import Attachment, AttachmentType, LXMFBot, IconAppearance, pack_icon_appearance_field
+from lxmfy import (
+    Attachment,
+    AttachmentType,
+    IconAppearance,
+    LXMFBot,
+    pack_icon_appearance_field,
+)
 from mgrs import MGRS
 from PIL import Image
 from pmtiles import reader
@@ -39,19 +44,19 @@ PMTILES_URL_BASE = "https://build.protomaps.com"
 # Bot icon appearance configuration
 BOT_ICON = IconAppearance(
     icon_name="map",  # Material Symbols map icon
-    fg_color=b'\xFF\xFF\xFF',  # White foreground
-    bg_color=b'\x1E\x88\xE5'   # Blue background (OpenStreetMap blue)
+    fg_color=b"\xFF\xFF\xFF",  # White foreground
+    bg_color=b"\x1E\x88\xE5",   # Blue background (OpenStreetMap blue)
 )
 
 BOT_ICON_FIELD = pack_icon_appearance_field(BOT_ICON)
 
 
 def download_latest_pmtiles() -> str | None:
-    """
-    Download the latest PMTiles file from Protomaps.
+    """Download the latest PMTiles file from Protomaps.
 
     Returns:
         str | None: Path to downloaded PMTiles file if successful, None if failed
+
     """
     try:
         PMTILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,9 +74,9 @@ def download_latest_pmtiles() -> str | None:
                 response = requests.get(url, stream=True, timeout=30)
                 response.raise_for_status()
 
-                total_size = int(response.headers.get('content-length', 0))
+                total_size = int(response.headers.get("content-length", 0))
 
-                with open(local_path, 'wb') as f:
+                with open(local_path, "wb") as f:
                     downloaded = 0
                     last_progress = -1
                     for chunk in response.iter_content(chunk_size=8192):
@@ -101,11 +106,11 @@ def download_latest_pmtiles() -> str | None:
 
 
 def get_pmtiles_path() -> str | None:
-    """
-    Get the path to the most recent PMTiles file (existing files only).
+    """Get the path to the most recent PMTiles file (existing files only).
 
     Returns:
         str | None: Path to PMTiles file if available, None if no files exist
+
     """
     try:
         if PMTILES_DIR.exists():
@@ -124,14 +129,14 @@ def get_pmtiles_path() -> str | None:
 
 
 def download_pmtiles_by_date(date_str: str | None = None) -> str | None:
-    """
-    Download PMTiles file for a specific date or the latest available.
+    """Download PMTiles file for a specific date or the latest available.
 
     Args:
         date_str: Date in YYYYMMDD format, or None for latest
 
     Returns:
         str | None: Path to downloaded PMTiles file if successful, None if failed
+
     """
     try:
         PMTILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -146,9 +151,9 @@ def download_pmtiles_by_date(date_str: str | None = None) -> str | None:
             response = requests.get(url, stream=True, timeout=30)
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = int(response.headers.get("content-length", 0))
 
-            with open(local_path, 'wb') as f:
+            with open(local_path, "wb") as f:
                 downloaded = 0
                 last_progress = -1
                 for chunk in response.iter_content(chunk_size=8192):
@@ -164,8 +169,7 @@ def download_pmtiles_by_date(date_str: str | None = None) -> str | None:
 
             logger.info("Successfully downloaded PMTiles: %s (%d bytes)", filename, downloaded)
             return str(local_path)
-        else:
-            return download_latest_pmtiles()
+        return download_latest_pmtiles()
 
     except Exception as e:
         logger.error("Error downloading PMTiles: %s", e)
@@ -173,11 +177,11 @@ def download_pmtiles_by_date(date_str: str | None = None) -> str | None:
 
 
 def update_pmtiles() -> str | None:
-    """
-    Update to the latest PMTiles if it's newer than the current local file.
+    """Update to the latest PMTiles if it's newer than the current local file.
 
     Returns:
         str | None: Path to updated/new PMTiles file if successful, None if failed
+
     """
     try:
         current_file = get_pmtiles_path()
@@ -185,7 +189,7 @@ def update_pmtiles() -> str | None:
 
         if current_file:
             filename = os.path.basename(current_file)
-            if filename.endswith('.pmtiles'):
+            if filename.endswith(".pmtiles"):
                 date_part = filename[:-8]
                 try:
                     current_date = datetime.strptime(date_part, "%Y%m%d").date()
@@ -208,7 +212,7 @@ def update_pmtiles() -> str | None:
 
 
 def _build_tile_url(
-    provider: str, zoom: int, xtile: int, ytile: int, layer: str | None = None
+    provider: str, zoom: int, xtile: int, ytile: int, layer: str | None = None,
 ) -> str:
     provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
     if provider_info.get("type") == "pmtiles":
@@ -217,10 +221,9 @@ def _build_tile_url(
 
 
 def _fetch_single_tile(
-    provider: str, layer: str | None, zoom: int, xtile: int, ytile: int
+    provider: str, layer: str | None, zoom: int, xtile: int, ytile: int,
 ) -> bytes | None:
-    """
-    Fetch a single map tile from OpenStreetMap or PMTiles file.
+    """Fetch a single map tile from OpenStreetMap or PMTiles file.
 
     Args:
         provider (str): Tile provider
@@ -231,6 +234,7 @@ def _fetch_single_tile(
 
     Returns:
         bytes | None: Raw image data if successful, None if failed
+
     """
     provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["osm"])
 
@@ -242,7 +246,7 @@ def _fetch_single_tile(
                 return None
 
         try:
-            with open(layer, 'rb') as f:
+            with open(layer, "rb") as f:
                 def get_bytes(offset, length):
                     f.seek(offset)
                     return f.read(length)
@@ -253,9 +257,8 @@ def _fetch_single_tile(
                 if tile_data:
                     logger.debug("Fetched PMTiles tile: %d/%d/%d from %s", zoom, xtile, ytile, layer)
                     return tile_data
-                else:
-                    logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, layer)
-                    return None
+                logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, layer)
+                return None
 
         except FileNotFoundError:
             logger.warning("PMTiles file not found: %s", layer)
@@ -273,21 +276,20 @@ def _fetch_single_tile(
             content_type = response.headers.get("Content-Type", "").lower()
             if "image" in content_type:
                 return response.content
-            else:
-                logger.warning(
-                    "Tile %d/%d/%d not an image. Content-Type: %s",
-                    zoom,
-                    xtile,
-                    ytile,
-                    content_type,
-                )
-                return None
+            logger.warning(
+                "Tile %d/%d/%d not an image. Content-Type: %s",
+                zoom,
+                xtile,
+                ytile,
+                content_type,
+            )
+            return None
         except requests.exceptions.RequestException as e:
             logger.warning("Error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e)
             return None
         except Exception as e:
             logger.error(
-                "Unexpected error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e
+                "Unexpected error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e,
             )
             return None
 
@@ -300,8 +302,7 @@ def get_openstreetmap_stitched_image(
     provider: str = "osm",
     layer: str | None = None,
 ) -> bytes | None:
-    """
-    Generate a stitched map image from OpenStreetMap tiles.
+    """Generate a stitched map image from OpenStreetMap tiles.
 
     Args:
         lat (float): Latitude of the center point
@@ -313,6 +314,7 @@ def get_openstreetmap_stitched_image(
 
     Returns:
         bytes | None: PNG image data if successful, None if failed
+
     """
     if grid_size < 1 or grid_size % 2 == 0:
         logger.error("Invalid grid_size: %d. Must be a positive odd number.", grid_size)
@@ -369,7 +371,7 @@ def get_openstreetmap_stitched_image(
         return None
 
     logger.info(
-        "Successfully stitched %d / %d tiles.", tiles_fetched, grid_size * grid_size
+        "Successfully stitched %d / %d tiles.", tiles_fetched, grid_size * grid_size,
     )
 
     try:
@@ -383,14 +385,14 @@ def get_openstreetmap_stitched_image(
 
 
 def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
-    """
-    Get latitude and longitude coordinates for a city name using geocoding.
+    """Get latitude and longitude coordinates for a city name using geocoding.
 
     Args:
         city_name (str): Name of the city to geocode
 
     Returns:
         tuple[float, float] | None: (latitude, longitude) if successful, None if failed
+
     """
     try:
         location = geolocator.geocode(city_name, timeout=10)
@@ -402,9 +404,8 @@ def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
                 location.longitude,
             )
             return location.latitude, location.longitude
-        else:
-            logger.warning("Could not geocode city: %s", city_name)
-            return None
+        logger.warning("Could not geocode city: %s", city_name)
+        return None
     except (GeocoderTimedOut, GeocoderServiceError) as e:
         logger.error("Geocoding error for '%s': %s", city_name, e)
         return None
@@ -414,19 +415,19 @@ def get_coords_from_city(city_name: str) -> tuple[float, float] | None:
 
 
 def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
-    """
-    Convert MGRS (Military Grid Reference System) coordinates to latitude and longitude.
+    """Convert MGRS (Military Grid Reference System) coordinates to latitude and longitude.
 
     Args:
         mgrs_coord (str): MGRS coordinate string
 
     Returns:
         tuple[float, float] | None: (latitude, longitude) if successful, None if failed
+
     """
     try:
         mgrs_coord_upper = mgrs_coord.upper().replace(" ", "")
         match = re.match(
-            r"^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$", mgrs_coord_upper
+            r"^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$", mgrs_coord_upper,
         )
 
         if not match:
@@ -472,17 +473,17 @@ def get_coords_from_mgrs(mgrs_coord: str) -> tuple[float, float] | None:
 
 
 def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
-    """
-    Parse a latitude/longitude coordinate string.
+    """Parse a latitude/longitude coordinate string.
 
     Args:
         coord_string (str): String containing latitude and longitude (e.g., "45.123, -122.456")
 
     Returns:
         tuple[float, float] | None: (latitude, longitude) if valid, None if invalid
+
     """
     match = re.match(
-        r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$", coord_string
+        r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$", coord_string,
     )
     if match:
         try:
@@ -491,17 +492,15 @@ def parse_lat_lon(coord_string: str) -> tuple[float, float] | None:
             if -90 <= lat <= 90 and -180 <= lon <= 180:
                 logger.info("Parsed Lat/Lon: (%s, %s)", lat, lon)
                 return lat, lon
-            else:
-                logger.warning("Invalid Lat/Lon range: (%s, %s)", lat, lon)
-                return None
+            logger.warning("Invalid Lat/Lon range: (%s, %s)", lat, lon)
+            return None
         except ValueError:
             return None
     return None
 
 
 class MapBot:
-    """
-    A bot that provides map functionality through LXMF messaging.
+    """A bot that provides map functionality through LXMF messaging.
 
     This bot allows users to request maps for locations specified in various formats:
     - MGRS (Military Grid Reference System) coordinates
@@ -513,14 +512,15 @@ class MapBot:
     Attributes:
         debug_mode (bool): Whether to enable detailed logging
         bot (LXMFBot): The underlying LXMF bot instance
+
     """
 
     def __init__(self, debug_mode=False):
-        """
-        Initialize the Map Bot.
+        """Initialize the Map Bot.
 
         Args:
             debug_mode (bool, optional): Enable detailed logging. Defaults to False.
+
         """
         self.debug_mode = debug_mode
         self.bot = LXMFBot(
@@ -539,26 +539,26 @@ class MapBot:
         )(self.handle_map_command)
         # Help command to show usage instructions
         self.bot.command(name="help", description="Show usage instructions")(
-            self.handle_help_command
+            self.handle_help_command,
         )
         self.bot.command(name="/help", description="Show usage instructions")(
-            self.handle_help_command
+            self.handle_help_command,
         )
         self.bot.command(
-            name="reverse", description="Reverse geocode Lat/Lon to address"
+            name="reverse", description="Reverse geocode Lat/Lon to address",
         )(self.handle_reverse_command)
 
     def send_message_with_icon(self, destination, message, title=None, **kwargs):
-        """
-        Send a message with the bot's icon appearance.
+        """Send a message with the bot's icon appearance.
 
         Args:
             destination: Message destination
             message: Message content
             title: Optional message title
             **kwargs: Additional arguments passed to bot.send()
+
         """
-        lxmf_fields = kwargs.pop('lxmf_fields', {})
+        lxmf_fields = kwargs.pop("lxmf_fields", {})
         lxmf_fields.update(BOT_ICON_FIELD)
 
         return self.bot.send(
@@ -566,18 +566,18 @@ class MapBot:
             message=message,
             title=title,
             lxmf_fields=lxmf_fields,
-            **kwargs
+            **kwargs,
         )
 
     def handle_map_command(self, ctx):
-        """
-        Handle the map command from users.
+        """Handle the map command from users.
 
         Processes location queries in various formats and returns an offline map image.
         Supports optional zoom level specification.
 
         Args:
             ctx: The command context containing the message and sender information
+
         """
         zoom = MAP_ZOOM_LEVEL
         provider = "pmtiles"
@@ -594,12 +594,12 @@ class MapBot:
                         logger.info("User specified zoom: %s", zoom_override)
                     else:
                         ctx.reply(
-                            f"Invalid zoom level specified: {val}. Must be between 1 and 19."
+                            f"Invalid zoom level specified: {val}. Must be between 1 and 19.",
                         )
                         return
                 except (ValueError, IndexError):
                     ctx.reply(
-                        f"Invalid format for zoom argument: '{arg}'. Use 'zoom=N'."
+                        f"Invalid format for zoom argument: '{arg}'. Use 'zoom=N'.",
                     )
                     return
             elif arg.lower().startswith("layer="):
@@ -611,7 +611,7 @@ class MapBot:
             zoom = zoom_override
         if not location_args:
             ctx.reply(
-                "Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]"
+                "Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]",
             )
             return
 
@@ -629,7 +629,7 @@ class MapBot:
         map_source_type = "location"
 
         if re.match(
-            r"^[0-9]{1,2}[C-HJ-NP-X]\s?[A-HJ-NP-Z]{2}", query.upper().split()[0]
+            r"^[0-9]{1,2}[C-HJ-NP-X]\s?[A-HJ-NP-Z]{2}", query.upper().split()[0],
         ):
             coords = get_coords_from_mgrs(query.upper())
             if coords:
@@ -655,12 +655,12 @@ class MapBot:
                     "No PMTiles data available. Please download PMTiles first using:\n"
                     "--download-latest (for latest)\n"
                     "--update (to update existing)\n"
-                    "--download YYYYMMDD (for specific date)"
+                    "--download YYYYMMDD (for specific date)",
                 )
                 return
 
             image_data = get_openstreetmap_stitched_image(
-                lat, lon, zoom, MAP_GRID_SIZE, provider, layer
+                lat, lon, zoom, MAP_GRID_SIZE, provider, layer,
             )
             osm_link = f"https://www.openstreetmap.org/#map={zoom}/{lat:.5f}/{lon:.5f}"
 
@@ -689,15 +689,15 @@ class MapBot:
                 except Exception as e:
                     logger.error("Failed to create or send map attachment: %s", e)
                     ctx.reply(
-                        f"Sorry, I encountered an error trying to send the map image: {e}"
+                        f"Sorry, I encountered an error trying to send the map image: {e}",
                     )
             else:
                 ctx.reply(
-                    f"Sorry, I couldn't retrieve the map image for {map_source_type} (zoom {zoom})."
+                    f"Sorry, I couldn't retrieve the map image for {map_source_type} (zoom {zoom}).",
                 )
         else:
             ctx.reply(
-                f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]"
+                f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]",
             )
 
     @staticmethod
@@ -727,8 +727,7 @@ class MapBot:
 
     @staticmethod
     def handle_reverse_command(ctx):
-        """
-        Reverse geocode a latitude/longitude to a human-readable address.
+        """Reverse geocode a latitude/longitude to a human-readable address.
         """
         if not ctx.args:
             ctx.reply("Usage: reverse <lat,lon>")
@@ -752,8 +751,7 @@ class MapBot:
 
 
     def run(self):
-        """
-        Start the Map Bot.
+        """Start the Map Bot.
 
         Initializes the bot and begins listening for commands.
         """
@@ -799,7 +797,7 @@ def main():
             print("Failed to download PMTiles.")
         return
 
-    elif args.update:
+    if args.update:
         print("Updating PMTiles...")
         path = update_pmtiles()
         if path:
@@ -809,7 +807,7 @@ def main():
             print("Failed to update PMTiles.")
         return
 
-    elif args.download:
+    if args.download:
         print(f"Downloading PMTiles for date {args.download}...")
         path = download_pmtiles_by_date(args.download)
         if path:
@@ -822,7 +820,7 @@ def main():
     map_bot.run()
 
     print(
-        "<< Remember to install dependencies: pip install requests geopy python-mgrs >>"
+        "<< Remember to install dependencies: pip install requests geopy python-mgrs >>",
     )
 
 
