@@ -236,7 +236,7 @@ def _fetch_single_tile(
         bytes | None: Raw image data if successful, None if failed
 
     """
-    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["osm"])
+    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
 
     if provider_info.get("type") == "pmtiles":
         if not layer:
@@ -294,22 +294,22 @@ def _fetch_single_tile(
             return None
 
 
-def get_openstreetmap_stitched_image(
+def get_stitched_map_image(
     lat: float,
     lon: float,
     zoom: int = MAP_ZOOM_LEVEL,
     grid_size: int = MAP_GRID_SIZE,
-    provider: str = "osm",
+    provider: str = "pmtiles",
     layer: str | None = None,
 ) -> bytes | None:
-    """Generate a stitched map image from OpenStreetMap tiles.
+    """Generate a stitched map image from tiles.
 
     Args:
         lat (float): Latitude of the center point
         lon (float): Longitude of the center point
         zoom (int, optional): Zoom level. Defaults to MAP_ZOOM_LEVEL.
         grid_size (int, optional): Size of the grid (must be odd). Defaults to MAP_GRID_SIZE.
-        provider (str, optional): Tile provider. Defaults to 'osm'.
+        provider (str, optional): Tile provider. Defaults to 'pmtiles'.
         layer (Optional[str], optional): Layer for the tile. Defaults to None.
 
     Returns:
@@ -659,7 +659,7 @@ class MapBot:
                 )
                 return
 
-            image_data = get_openstreetmap_stitched_image(
+            image_data = get_stitched_map_image(
                 lat, lon, zoom, MAP_GRID_SIZE, provider, layer,
             )
             osm_link = f"https://www.openstreetmap.org/#map={zoom}/{lat:.5f}/{lon:.5f}"
@@ -682,7 +682,6 @@ class MapBot:
                         message=message,
                         attachment=attachment,
                         title="Map Location",
-                        lxmf_fields=BOT_ICON_FIELD,
                     )
                     logger.info("Sent map image and link for '%s' to %s", query, sender)
 
