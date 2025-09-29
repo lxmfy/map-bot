@@ -1,7 +1,10 @@
 import io
 import logging
 import math
+import os
 import re
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 from geopy.exc import GeocoderServiceError, GeocoderTimedOut
@@ -9,6 +12,7 @@ from geopy.geocoders import Nominatim
 from lxmfy import Attachment, AttachmentType, LXMFBot
 from mgrs import MGRS
 from PIL import Image
+from pmtiles import reader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,39 +22,199 @@ MAP_GRID_SIZE = 3
 TILE_SIZE = 256
 USER_AGENT = "lxmfy_map_bot/1.0 (requests)"
 
-# Tile providers configuration
 TILE_PROVIDERS = {
-    "osm": {
-        "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        "attribution": "© OpenStreetMap contributors",
-    },
-    "openfree": {
-        "url": "https://tile.openfreemap.org/hike/{z}/{x}/{y}.png",
-        "attribution": "© OpenFreeMap",
+    "pmtiles": {
+        "type": "pmtiles",
+        "attribution": "Protomaps - Offline tiles",
     },
 }
 
 geolocator = Nominatim(user_agent="lxmfy_map_bot/1.0")
 m = MGRS()
 
+PMTILES_DIR = Path("data/pmtiles")
+PMTILES_URL_BASE = "https://build.protomaps.com"
+
+
+def download_latest_pmtiles() -> str | None:
+    """
+    Download the latest PMTiles file from Protomaps.
+
+    Returns:
+        str | None: Path to downloaded PMTiles file if successful, None if failed
+    """
+    try:
+        PMTILES_DIR.mkdir(parents=True, exist_ok=True)
+
+        for days_ago in range(7):
+            date = datetime.now() - timedelta(days=days_ago)
+            date_str = date.strftime("%Y%m%d")
+            filename = f"{date_str}.pmtiles"
+            url = f"{PMTILES_URL_BASE}/{filename}"
+            local_path = PMTILES_DIR / filename
+
+            logger.info("Trying to download PMTiles: %s", url)
+
+            try:
+                response = requests.get(url, stream=True, timeout=30)
+                response.raise_for_status()
+
+                total_size = int(response.headers.get('content-length', 0))
+
+                with open(local_path, 'wb') as f:
+                    downloaded = 0
+                    last_progress = -1
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                progress = (downloaded / total_size) * 100
+                                progress_int = int(progress)
+                                if progress_int > last_progress:
+                                    logger.info("Download progress: %d%%", progress_int)
+                                    last_progress = progress_int
+
+                logger.info("Successfully downloaded PMTiles: %s (%d bytes)", filename, downloaded)
+                return str(local_path)
+
+            except requests.exceptions.RequestException as e:
+                logger.warning("Failed to download %s: %s", url, e)
+                continue
+
+        logger.error("Could not download any PMTiles file in the last 7 days")
+        return None
+
+    except Exception as e:
+        logger.error("Error in download_latest_pmtiles: %s", e)
+        return None
+
+
+def get_pmtiles_path() -> str | None:
+    """
+    Get the path to the most recent PMTiles file (existing files only).
+
+    Returns:
+        str | None: Path to PMTiles file if available, None if no files exist
+    """
+    try:
+        if PMTILES_DIR.exists():
+            pmtiles_files = list(PMTILES_DIR.glob("*.pmtiles"))
+            if pmtiles_files:
+                latest_file = max(pmtiles_files, key=lambda f: f.stat().st_mtime)
+                logger.info("Using existing PMTiles file: %s", latest_file)
+                return str(latest_file)
+
+        logger.info("No PMTiles files found locally")
+        return None
+
+    except Exception as e:
+        logger.error("Error getting PMTiles path: %s", e)
+        return None
+
+
+def download_pmtiles_by_date(date_str: str | None = None) -> str | None:
+    """
+    Download PMTiles file for a specific date or the latest available.
+
+    Args:
+        date_str: Date in YYYYMMDD format, or None for latest
+
+    Returns:
+        str | None: Path to downloaded PMTiles file if successful, None if failed
+    """
+    try:
+        PMTILES_DIR.mkdir(parents=True, exist_ok=True)
+
+        if date_str:
+            filename = f"{date_str}.pmtiles"
+            url = f"{PMTILES_URL_BASE}/{filename}"
+            local_path = PMTILES_DIR / filename
+
+            logger.info("Downloading PMTiles for date %s: %s", date_str, url)
+
+            response = requests.get(url, stream=True, timeout=30)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+
+            with open(local_path, 'wb') as f:
+                downloaded = 0
+                last_progress = -1
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = (downloaded / total_size) * 100
+                            progress_int = int(progress)
+                            if progress_int > last_progress:
+                                logger.info("Download progress: %d%%", progress_int)
+                                last_progress = progress_int
+
+            logger.info("Successfully downloaded PMTiles: %s (%d bytes)", filename, downloaded)
+            return str(local_path)
+        else:
+            return download_latest_pmtiles()
+
+    except Exception as e:
+        logger.error("Error downloading PMTiles: %s", e)
+        return None
+
+
+def update_pmtiles() -> str | None:
+    """
+    Update to the latest PMTiles if it's newer than the current local file.
+
+    Returns:
+        str | None: Path to updated/new PMTiles file if successful, None if failed
+    """
+    try:
+        current_file = get_pmtiles_path()
+        current_date = None
+
+        if current_file:
+            filename = os.path.basename(current_file)
+            if filename.endswith('.pmtiles'):
+                date_part = filename[:-8]
+                try:
+                    current_date = datetime.strptime(date_part, "%Y%m%d").date()
+                    logger.info("Current PMTiles date: %s", current_date)
+                except ValueError:
+                    logger.warning("Could not parse date from filename: %s", filename)
+
+        latest_path = download_latest_pmtiles()
+
+        if latest_path:
+            if current_file and latest_path != current_file:
+                logger.info("Updated to newer PMTiles: %s", os.path.basename(latest_path))
+            return latest_path
+
+        return current_file
+
+    except Exception as e:
+        logger.error("Error updating PMTiles: %s", e)
+        return get_pmtiles_path()
+
 
 def _build_tile_url(
     provider: str, zoom: int, xtile: int, ytile: int, layer: str | None = None
 ) -> str:
-    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["osm"])
-    url_template = provider_info["url"]
-    return url_template.format(z=zoom, x=xtile, y=ytile)
+    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["pmtiles"])
+    if provider_info.get("type") == "pmtiles":
+        return f"pmtiles://{zoom}/{xtile}/{ytile}"
+    return f"pmtiles://{zoom}/{xtile}/{ytile}"
 
 
 def _fetch_single_tile(
     provider: str, layer: str | None, zoom: int, xtile: int, ytile: int
 ) -> bytes | None:
     """
-    Fetch a single map tile from OpenStreetMap.
+    Fetch a single map tile from OpenStreetMap or PMTiles file.
 
     Args:
         provider (str): Tile provider
-        layer (Optional[str]): Layer for the tile
+        layer (Optional[str]): Layer/file path for the tile (used for PMTiles)
         zoom (int): Zoom level of the tile
         xtile (int): X coordinate of the tile
         ytile (int): Y coordinate of the tile
@@ -58,32 +222,64 @@ def _fetch_single_tile(
     Returns:
         bytes | None: Raw image data if successful, None if failed
     """
-    tile_url = _build_tile_url(provider, zoom, xtile, ytile, layer)
-    logger.debug("Fetching single map tile: %s", tile_url)
-    try:
-        headers = {"User-Agent": USER_AGENT}
-        response = requests.get(tile_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "").lower()
-        if "image" in content_type:
-            return response.content
-        else:
-            logger.warning(
-                "Tile %d/%d/%d not an image. Content-Type: %s",
-                zoom,
-                xtile,
-                ytile,
-                content_type,
+    provider_info = TILE_PROVIDERS.get(provider, TILE_PROVIDERS["osm"])
+
+    if provider_info.get("type") == "pmtiles":
+        if not layer:
+            layer = get_pmtiles_path()
+            if not layer:
+                logger.error("No PMTiles file available and download failed")
+                return None
+
+        try:
+            with open(layer, 'rb') as f:
+                def get_bytes(offset, length):
+                    f.seek(offset)
+                    return f.read(length)
+
+                pmtiles_reader = reader.Reader(get_bytes)
+                tile_data = pmtiles_reader.get(zoom, xtile, ytile)
+
+                if tile_data:
+                    logger.debug("Fetched PMTiles tile: %d/%d/%d from %s", zoom, xtile, ytile, layer)
+                    return tile_data
+                else:
+                    logger.debug("Tile %d/%d/%d not found in PMTiles file %s", zoom, xtile, ytile, layer)
+                    return None
+
+        except FileNotFoundError:
+            logger.warning("PMTiles file not found: %s", layer)
+            return None
+        except Exception as e:
+            logger.error("Error reading PMTiles tile %d/%d/%d from %s: %s", zoom, xtile, ytile, layer, e)
+            return None
+    else:
+        tile_url = _build_tile_url(provider, zoom, xtile, ytile, layer)
+        logger.debug("Fetching single map tile: %s", tile_url)
+        try:
+            headers = {"User-Agent": USER_AGENT}
+            response = requests.get(tile_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "image" in content_type:
+                return response.content
+            else:
+                logger.warning(
+                    "Tile %d/%d/%d not an image. Content-Type: %s",
+                    zoom,
+                    xtile,
+                    ytile,
+                    content_type,
+                )
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.warning("Error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e)
+            return None
+        except Exception as e:
+            logger.error(
+                "Unexpected error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e
             )
             return None
-    except requests.exceptions.RequestException as e:
-        logger.warning("Error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e)
-        return None
-    except Exception as e:
-        logger.error(
-            "Unexpected error fetching tile %d/%d/%d: %s", zoom, xtile, ytile, e
-        )
-        return None
 
 
 def get_openstreetmap_stitched_image(
@@ -328,7 +524,7 @@ class MapBot:
         )
         self.bot.command(
             name="map",
-            description="Get map for MGRS, Lat/Lon, or City. Optional: zoom=N (1-19)",
+            description="Get offline map for MGRS, Lat/Lon, or City. Optional: zoom=N (1-19)",
         )(self.handle_map_command)
         # Help command to show usage instructions
         self.bot.command(name="help", description="Show usage instructions")(
@@ -345,18 +541,17 @@ class MapBot:
         """
         Handle the map command from users.
 
-        Processes location queries in various formats and returns a map image and link.
+        Processes location queries in various formats and returns an offline map image.
         Supports optional zoom level specification.
 
         Args:
             ctx: The command context containing the message and sender information
         """
         zoom = MAP_ZOOM_LEVEL
-        provider = "osm"
+        provider = "pmtiles"
         layer = None
         location_args = []
         zoom_override = None
-        provider_override = None
 
         for arg in ctx.args:
             if arg.lower().startswith("zoom="):
@@ -375,27 +570,16 @@ class MapBot:
                         f"Invalid format for zoom argument: '{arg}'. Use 'zoom=N'."
                     )
                     return
-            elif arg.lower().startswith("provider="):
-                val = arg.split("=", 1)[1].lower()
-                if val in TILE_PROVIDERS:
-                    provider_override = val
-                else:
-                    ctx.reply(
-                        f"Invalid provider specified: {val}. Available: {', '.join(TILE_PROVIDERS.keys())}"
-                    )
-                    return
             elif arg.lower().startswith("layer="):
-                layer = arg.split("=", 1)[1].lower()
+                layer = arg.split("=", 1)[1]
             else:
                 location_args.append(arg)
 
         if zoom_override is not None:
             zoom = zoom_override
-        if provider_override:
-            provider = provider_override
         if not location_args:
             ctx.reply(
-                "Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]"
+                "Please provide a location (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]"
             )
             return
 
@@ -433,6 +617,16 @@ class MapBot:
                 map_source_type = f"city/town '{query}'"
 
         if lat is not None and lon is not None:
+            pmtiles_path = get_pmtiles_path()
+            if not pmtiles_path:
+                ctx.reply(
+                    "No PMTiles data available. Please download PMTiles first using:\n"
+                    "--download-latest (for latest)\n"
+                    "--update (to update existing)\n"
+                    "--download YYYYMMDD (for specific date)"
+                )
+                return
+
             image_data = get_openstreetmap_stitched_image(
                 lat, lon, zoom, MAP_GRID_SIZE, provider, layer
             )
@@ -470,23 +664,26 @@ class MapBot:
                 )
         else:
             ctx.reply(
-                f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]"
+                f"Sorry, I couldn't understand or find the location: '{location_query}'. Please check the format (MGRS, Lat/Lon, or City/Town). Usage: map <location> [zoom=N]"
             )
 
     @staticmethod
     def handle_help_command(ctx):
-        """
-        Provide usage instructions for the map command.
-        """
         help_msg = (
-            "Usage: map <location> [zoom=N] [provider=<provider>] [layer=<layer>]\n\n"
-            "Get a stitched OpenStreetMap image based on:\n"
+            "Usage: map <location> [zoom=N]\n\n"
+            "Get an offline stitched map image using PMTiles data:\n"
             "- MGRS coordinates (e.g., 38SMB12345678)\n"
             "- Latitude/Longitude (e.g., 40.7128,-74.0060)\n"
             "- City/Town name (e.g., New York City)\n\n"
             "Optional zoom levels: zoom=1 through zoom=19\n"
-            "Optional tile providers: provider=osm,stamen,openfree\n"
-            "Optional layers (for stamen): layer=terrain,toner,watercolor\n"
+            "PMTiles data must be downloaded first using command-line flags.\n\n"
+            "Commands:\n"
+            "map <location> [zoom=N] - Get map for location\n"
+            "reverse <lat,lon> - Reverse geocode coordinates to address\n\n"
+            "Download PMTiles data first:\n"
+            "--download-latest  - Download latest available\n"
+            "--update           - Update if newer available\n"
+            "--download YYYYMMDD - Download specific date\n\n"
             "Examples:\n"
             "map 38SMB12345678\n"
             "map 40.7128,-74.0060 zoom=12\n"
@@ -520,6 +717,7 @@ class MapBot:
         except Exception as e:
             ctx.reply(f"Unexpected error: {e}")
 
+
     def run(self):
         """
         Start the Map Bot.
@@ -539,8 +737,54 @@ def main():
         action="store_true",
         help="Enable detailed logging (currently mainly for startup/errors).",
     )
-    args = parser.parse_args()
 
+    pmtiles_group = parser.add_mutually_exclusive_group()
+    pmtiles_group.add_argument(
+        "--download-latest",
+        action="store_true",
+        help="Download the latest available PMTiles file from Protomaps.",
+    )
+    pmtiles_group.add_argument(
+        "--update",
+        action="store_true",
+        help="Update to the latest PMTiles if newer than current local file.",
+    )
+    pmtiles_group.add_argument(
+        "--download",
+        metavar="DATE",
+        help="Download PMTiles file for specific date (YYYYMMDD format).",
+    )
+
+    args = parser.parse_args()
+    if args.download_latest:
+        print("Downloading latest PMTiles...")
+        path = download_pmtiles_by_date()
+        if path:
+            file_size = os.path.getsize(path) / (1024 * 1024)
+            print(f"Successfully downloaded: {os.path.basename(path)} ({file_size:.1f} MB)")
+        else:
+            print("Failed to download PMTiles.")
+        return
+
+    elif args.update:
+        print("Updating PMTiles...")
+        path = update_pmtiles()
+        if path:
+            file_size = os.path.getsize(path) / (1024 * 1024)
+            print(f"PMTiles ready: {os.path.basename(path)} ({file_size:.1f} MB)")
+        else:
+            print("Failed to update PMTiles.")
+        return
+
+    elif args.download:
+        print(f"Downloading PMTiles for date {args.download}...")
+        path = download_pmtiles_by_date(args.download)
+        if path:
+            file_size = os.path.getsize(path) / (1024 * 1024)
+            print(f"Successfully downloaded: {os.path.basename(path)} ({file_size:.1f} MB)")
+        else:
+            print("Failed to download PMTiles for specified date.")
+        return
     map_bot = MapBot(debug_mode=args.debug)
     map_bot.run()
 
