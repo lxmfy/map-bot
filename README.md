@@ -4,36 +4,16 @@ A privacy-focused LXMFy bot that generates offline map images using PMTiles data
 
 ## Features
 
-- **Offline Operation**: Uses PMTiles for completely offline map generation
+- **OpenStreetMap Tiles**: Uses OpenStreetMap tiles for map generation - for now
 - **Multiple Coordinate Systems**: Supports MGRS, latitude/longitude, and city names
-- **Privacy-Focused**: No data sent to external mapping services during operation except OSM nominatim for geocoding
+
+Goal is to move to a offline solution in the future.
 
 ## Installation
 
 ```bash
 pipx install git+https://github.com/lxmfy/map-bot
 ```
-
-## Setup & Data Download
-
-**Important**: You must download PMTiles data before using the bot.
-
-### Download Latest PMTiles
-```bash
-map-bot --download-latest
-```
-
-### Download Specific Date
-```bash
-map-bot --download 20250929
-```
-
-### Update Existing Data
-```bash
-map-bot --update
-```
-
-PMTiles data is stored in `data/pmtiles/` and sourced from [Protomaps](https://maps.protomaps.com).
 
 ## Usage
 
@@ -65,9 +45,6 @@ map <location> [zoom=N]
 ## Examples
 
 ```bash
-# Download latest map data first
-map-bot --download-latest
-
 # Start the bot
 map-bot
 
